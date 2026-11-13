@@ -25,7 +25,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.getSystemService
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
-import io.noties.markwon.ext.tables.TablesPlugin
+import io.noties.markwon.ext.tables.TablePlugin
 
 /** Shared Markdown renderer for normal chat, streaming output and multi-agent results. */
 @Composable
@@ -35,7 +35,7 @@ fun MarkdownText(markdown: String, showCopy: Boolean = true) {
     val markwon = remember(context) {
         Markwon.builder(context)
             .usePlugin(StrikethroughPlugin.create())
-            .usePlugin(TablesPlugin.create(context))
+            .usePlugin(TablePlugin.create(context))
             .build()
     }
 
