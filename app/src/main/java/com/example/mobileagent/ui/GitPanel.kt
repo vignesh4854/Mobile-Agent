@@ -61,7 +61,7 @@ fun GitPanel(context: Context) {
             appendLine("Untracked: ${s.untracked.joinToString().ifBlank { "—" }}")
             append("Conflicts: ${s.conflicting.joinToString().ifBlank { "—" }}")
         }
-        statusText
+        return statusText
     }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
