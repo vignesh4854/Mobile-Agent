@@ -8,11 +8,17 @@ import java.util.UUID
 
 data class PendingEdit(val relativePath: String, val expectedSha256: String, val replacementText: String)
 data class FileChangeResult(val relativePath: String, val backupPath: String, val newSha256: String)
+data class WorkspaceSnapshot(
+    val relativePath: String,
+    val exists: Boolean,
+    val content: String,
+    val sha256: String
+)
 
 /** Only this service should perform model-requested workspace file operations. */
 class WorkspaceFiles(
     private val workspace: WorkspaceManager,
-    private val audit: AuditLog,
+    private val audit: AuditRecorder,
     private val maxReadBytes: Long = 512 * 1024,
     private val maxWriteBytes: Long = 1024 * 1024
 ) {
@@ -36,7 +42,7 @@ class WorkspaceFiles(
     fun readRange(path: String, startLine: Int, endLine: Int): String {
         require(startLine >= 1 && endLine >= startLine && endLine - startLine <= 2000)
         return read(path).lineSequence().drop(startLine - 1).take(endLine - startLine + 1)
-            .mapIndexed { i, line -> "${startLine + i}: $line" }.joinToString("\n")
+            .mapIndexed { i, line -> "${startLine + i}: $line" }.joinToString("\\n")
     }
 
     fun searchText(query: String, directory: String = ""): List<String> {
@@ -57,6 +63,18 @@ class WorkspaceFiles(
             }
         audit.record("search_text", directory, "matches=${hits.size}")
         return hits
+    }
+
+    /** Read a bounded, policy-checked snapshot for patch planning and stale-edit detection. */
+    fun snapshot(path: String): WorkspaceSnapshot {
+        SensitiveFilePolicy.requireAllowed(path)
+        val file = resolve(path)
+        require(!file.exists() || file.isFile) { "Path is not a regular file" }
+        require(!file.exists() || file.length() <= maxReadBytes) { "File exceeds snapshot size limit" }
+        val content = if (file.exists()) file.readText(Charsets.UTF_8) else ""
+        val hash = sha256(content.toByteArray(Charsets.UTF_8))
+        audit.record("snapshot_file", path, if (file.exists()) "exists;sha256=$hash" else "new;sha256=$hash")
+        return WorkspaceSnapshot(path, file.exists(), content, hash)
     }
 
     /** Call only after the UI has approved this exact proposal. */
@@ -82,12 +100,18 @@ class WorkspaceFiles(
 
 
     /** Restore a previously created backup into a workspace-relative file path. */
-    fun restoreBackup(backupPath: String, relativePath: String): String {
+    fun restoreBackup(backupPath: String, relativePath: String, expectedCurrentSha256: String? = null): String {
         SensitiveFilePolicy.requireAllowed(relativePath)
         val backup = File(backupPath).canonicalFile
         require(backup.parentFile == backups.canonicalFile) { "Backup is outside the backup store" }
         require(backup.isFile) { "Backup not found" }
         val target = resolve(relativePath)
+        if (expectedCurrentSha256 != null) {
+            val currentHash = if (target.exists() && target.isFile) sha256(target.readBytes()) else sha256(ByteArray(0))
+            require(currentHash == expectedCurrentSha256) {
+                "File changed since checkpoint; refusing to overwrite newer content."
+            }
+        }
         val marker = backup.readText(Charsets.UTF_8).takeIf { backup.length() < 64 } == "__AGENT_NEW_FILE__"
         if (marker) {
             if (target.exists()) require(target.delete()) { "Could not remove newly created file" }
@@ -103,7 +127,7 @@ class WorkspaceFiles(
     }
 
     private fun resolve(path: String, allowRoot: Boolean = false): File {
-        require(!path.startsWith("/") && !path.startsWith("\\")) { "Absolute paths are not allowed" }
+        require(!path.startsWith("/") && !path.startsWith("\\\\")) { "Absolute paths are not allowed" }
         val parts = path.replace('\\', '/').split('/')
         require(parts.none { it == ".." }) { "Parent traversal is not allowed" }
         val candidate = if (path.isBlank()) workspace.root else File(workspace.root, path)

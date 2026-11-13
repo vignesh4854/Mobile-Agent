@@ -6,11 +6,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class AuditLog(context: Context) {
+class AuditLog(context: Context) : AuditRecorder {
     private val file = File(context.filesDir, "agent-audit.jsonl")
 
     @Synchronized
-    fun record(tool: String, path: String, outcome: String) {
+    override fun record(tool: String, path: String, outcome: String) {
         val time = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US).format(Date())
         fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")
         val line = "{\"time\":\"${esc(time)}\",\"tool\":\"${esc(tool)}\",\"path\":\"${esc(path)}\",\"outcome\":\"${esc(outcome.take(500))}\"}"

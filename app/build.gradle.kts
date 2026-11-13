@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 android {
     namespace = "com.example.mobileagent"
@@ -10,8 +11,8 @@ android {
         applicationId = "com.example.mobileagent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "2.7.0"
+        versionCode = 11
+        versionName = "3.1.0"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -20,6 +21,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 }
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.10.0")
@@ -29,11 +31,16 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("io.github.java-diff-utils:java-diff-utils:4.15")
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.0.202406032230-r")
+    testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

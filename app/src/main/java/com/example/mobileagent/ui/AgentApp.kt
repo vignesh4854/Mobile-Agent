@@ -15,7 +15,13 @@ import com.example.mobileagent.agent.ToolOutcome
 import com.example.mobileagent.model.*
 import com.example.mobileagent.provider.HttpProviderClient
 import com.example.mobileagent.security.ApiConfigStore
+import com.example.mobileagent.data.repository.ProjectRepository
+import com.example.mobileagent.data.repository.SessionRepository
+import androidx.compose.runtime.LaunchedEffect
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import androidx.compose.runtime.saveable.rememberSaveable
 
 @Composable
@@ -42,7 +48,51 @@ fun AgentApp(context: Context) {
     var lastBackup by remember { mutableStateOf<Pair<String, String>?>(null) }
     val messages = remember { mutableStateListOf<ChatMessage>() }
     val scope = rememberCoroutineScope()
+    val projectRepository = remember { ProjectRepository(context.applicationContext) }
+    val sessionRepository = remember { SessionRepository(context.applicationContext) }
+    var activeSessionId by remember { mutableStateOf<String?>(null) }
+    var sessionReady by remember { mutableStateOf(false) }
     val client = remember { HttpProviderClient() }
+
+    LaunchedEffect(Unit) {
+        runCatching {
+            val project = projectRepository.ensureDefaultProject()
+            val session = sessionRepository.getOrCreateSession(project.id)
+            activeSessionId = session.id
+            sessionRepository.observeMessages(session.id).collect { stored ->
+                if (!sessionReady) {
+                    messages.clear()
+                    messages.addAll(stored.map { entity ->
+                        val calls = runCatching {
+                            val array = JSONArray(entity.toolCallsJson)
+                            (0 until array.length()).mapNotNull { index ->
+                                array.optJSONObject(index)?.let { obj ->
+                                    ToolCallRequest(obj.optString("id"), obj.optString("name"), obj.optString("argumentsJson"))
+                                }
+                            }
+                        }.getOrDefault(emptyList())
+                        ChatMessage(MessageRole.valueOf(entity.role), entity.content,
+                            toolCallId = entity.toolCallId, toolName = entity.toolName, toolCalls = calls)
+                    })
+                    sessionReady = true
+                }
+            }
+        }.onFailure { status = "Session storage unavailable: ${it.message}"; sessionReady = true }
+    }
+
+    fun appendMessage(message: ChatMessage) {
+        messages.add(message)
+        val sessionId = activeSessionId ?: return
+        val calls = JSONArray().apply {
+            message.toolCalls.forEach { call -> put(JSONObject().put("id", call.id).put("name", call.name)
+                .put("argumentsJson", call.argumentsJson)) }
+        }
+        scope.launch {
+            runCatching { sessionRepository.appendMessage(sessionId, message.role.name, message.content,
+                calls.toString(), message.toolCallId, message.toolName) }
+                .onFailure { status = "Message persistence failed: ${it.message}" }
+        }
+    }
     val maxToolRounds = 4
 
     fun mode(m: ProtocolMode) {
@@ -60,7 +110,7 @@ fun AgentApp(context: Context) {
                 mainHandler.post { streamingText += part }
             }
             if (reply.text.isNotBlank() || reply.toolCalls.isNotEmpty()) {
-                messages += ChatMessage(MessageRole.ASSISTANT, reply.text, toolCalls = reply.toolCalls)
+                appendMessage(ChatMessage(MessageRole.ASSISTANT, reply.text, toolCalls = reply.toolCalls))
             }
             if (reply.toolCalls.isEmpty()) {
                 status = "Completed."
@@ -69,8 +119,8 @@ fun AgentApp(context: Context) {
             var needsApproval = false
             reply.toolCalls.forEach { call ->
                 if (needsApproval) {
-                    messages += ChatMessage(MessageRole.TOOL, "Deferred because another action is awaiting user approval.",
-                        toolCallId = call.id, toolName = call.name)
+                    appendMessage(ChatMessage(MessageRole.TOOL, "Deferred because another action is awaiting user approval.",
+                        toolCallId = call.id, toolName = call.name))
                     return@forEach
                 }
                 when (call.name) {
@@ -83,7 +133,7 @@ fun AgentApp(context: Context) {
                             is ToolOutcome.Error -> "ERROR: ${outcome.message}"
                             else -> "Unsupported result"
                         }
-                        messages += ChatMessage(MessageRole.TOOL, result, toolCallId = call.id, toolName = call.name)
+                        appendMessage(ChatMessage(MessageRole.TOOL, result, toolCallId = call.id, toolName = call.name))
                     }
                     "propose_git_commit", "propose_git_pull", "propose_git_push", "propose_trigger_workflow" -> {
                         when (val outcome = gateway.prepareAction(call)) {
@@ -91,8 +141,8 @@ fun AgentApp(context: Context) {
                                 pendingAction = outcome
                                 needsApproval = true
                             }
-                            is ToolOutcome.Error -> messages += ChatMessage(MessageRole.TOOL,
-                                "ERROR: ${outcome.message}", toolCallId = call.id, toolName = call.name)
+                            is ToolOutcome.Error -> appendMessage(ChatMessage(MessageRole.TOOL,
+                                "ERROR: ${outcome.message}", toolCallId = call.id, toolName = call.name))
                             else -> Unit
                         }
                     }
@@ -102,13 +152,13 @@ fun AgentApp(context: Context) {
                                 pendingProposal = outcome
                                 needsApproval = true
                             }
-                            is ToolOutcome.Error -> messages += ChatMessage(MessageRole.TOOL,
-                                "ERROR: ${outcome.message}", toolCallId = call.id, toolName = call.name)
+                            is ToolOutcome.Error -> appendMessage(ChatMessage(MessageRole.TOOL,
+                                "ERROR: ${outcome.message}", toolCallId = call.id, toolName = call.name))
                             else -> Unit
                         }
                     }
-                    else -> messages += ChatMessage(MessageRole.TOOL, "ERROR: unknown tool",
-                        toolCallId = call.id, toolName = call.name)
+                    else -> appendMessage(ChatMessage(MessageRole.TOOL, "ERROR: unknown tool",
+                        toolCallId = call.id, toolName = call.name))
                 }
             }
             if (needsApproval) {
@@ -139,10 +189,12 @@ fun AgentApp(context: Context) {
                 Tab(selected = selectedScreen == 0, onClick = { selectedScreen = 0 }, text = { Text("Agent") })
                 Tab(selected = selectedScreen == 1, onClick = { selectedScreen = 1 }, text = { Text("Git") })
                 Tab(selected = selectedScreen == 2, onClick = { selectedScreen = 2 }, text = { Text("Research") })
+                Tab(selected = selectedScreen == 3, onClick = { selectedScreen = 3 }, text = { Text("Projects") })
             }
             when (selectedScreen) {
                 1 -> GitPanel(context)
                 2 -> ResearchPanel(context)
+                3 -> ProjectsScreen(context)
             }
         }
         return
@@ -157,8 +209,8 @@ fun AgentApp(context: Context) {
             }
         }
         item {
-            Text("Mobile Agent V2.7", style = MaterialTheme.typography.headlineMedium)
-            Text("Web research · Git approvals · workflow dispatch · approved file edits")
+            Text("Mobile Agent V3.0", style = MaterialTheme.typography.headlineMedium)
+            Text("Native agent foundation · local projects · provider-independent orchestration")
         }
         item {
             Text("Protocol", style = MaterialTheme.typography.titleMedium)
@@ -182,7 +234,11 @@ fun AgentApp(context: Context) {
                 Button(onClick = { runCatching {
                     store.save(ApiConfig(baseUrl, endpoint, apiKey, model, protocol)); status = "Settings saved."
                 }.onFailure { status = it.message ?: "Save failed" } }) { Text("Save settings") }
-                OutlinedButton(onClick = { messages.clear(); pendingProposal = null; pendingAction = null; lastBackup = null; status = "Chat cleared." }) { Text("Clear chat") }
+                OutlinedButton(onClick = {
+                    messages.clear(); pendingProposal = null; pendingAction = null; lastBackup = null
+                    activeSessionId?.let { id -> scope.launch { sessionRepository.clearMessages(id) } }
+                    status = "Chat cleared."
+                }) { Text("Clear chat") }
             }
         }
         item { HorizontalDivider() }
@@ -207,8 +263,8 @@ fun AgentApp(context: Context) {
         }
         item {
             OutlinedTextField(input, { input = it }, Modifier.fillMaxWidth(), label = { Text("Message") }, minLines = 2)
-            Button(enabled = !busy && input.isNotBlank(), onClick = {
-                messages += ChatMessage(MessageRole.USER, input.trim())
+            Button(enabled = sessionReady && !busy && input.isNotBlank(), onClick = {
+                appendMessage(ChatMessage(MessageRole.USER, input.trim()))
                 input = ""
                 startAgent()
             }) { Text(if (busy) "Working…" else "Send") }
@@ -230,21 +286,21 @@ fun AgentApp(context: Context) {
                                         val result = gateway.executeApprovedAction(
                                             proposal, githubToken, githubOwner.trim(), githubRepo.trim()
                                         )
-                                        messages += ChatMessage(MessageRole.TOOL, "Approved action result: $result",
-                                            toolCallId = proposal.callId, toolName = proposal.toolName)
+                                        appendMessage(ChatMessage(MessageRole.TOOL, "Approved action result: $result",
+                                            toolCallId = proposal.callId, toolName = proposal.toolName))
                                         pendingAction = null
                                         status = "Action completed. Continue agent?"
                                     } catch (e: Exception) {
-                                        messages += ChatMessage(MessageRole.TOOL, "Approved action failed: ${e.message}",
-                                            toolCallId = proposal.callId, toolName = proposal.toolName)
+                                        appendMessage(ChatMessage(MessageRole.TOOL, "Approved action failed: ${e.message}",
+                                            toolCallId = proposal.callId, toolName = proposal.toolName))
                                         pendingAction = null
                                         status = e.message ?: "Approved action failed."
                                     } finally { busy = false }
                                 }
                             }) { Text("Approve and execute") }
                             OutlinedButton(enabled = !busy, onClick = {
-                                messages += ChatMessage(MessageRole.TOOL, "User rejected this proposed action; it was not executed.",
-                                    toolCallId = proposal.callId, toolName = proposal.toolName)
+                                appendMessage(ChatMessage(MessageRole.TOOL, "User rejected this proposed action; it was not executed.",
+                                    toolCallId = proposal.callId, toolName = proposal.toolName))
                                 pendingAction = null
                                 status = "Action rejected. Continue agent?"
                             }) { Text("Reject") }
@@ -268,17 +324,17 @@ fun AgentApp(context: Context) {
                                 runCatching {
                                     val result = gateway.approve(proposal)
                                     lastBackup = result.backupPath to proposal.path
-                                    messages += ChatMessage(MessageRole.TOOL, "Approved and applied: ${result.relativePath}",
+                                    appendMessage(ChatMessage(MessageRole.TOOL, "Approved and applied: ${result.relativePath}",
                                         toolCallId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.firstOrNull { it.name == "propose_write_file" }?.id,
-                                        toolName = "propose_write_file")
+                                        toolName = "propose_write_file"))
                                     pendingProposal = null
                                     status = "Write approved. Continue agent?"
                                 }.onFailure { status = it.message ?: "Write failed" }
                             }) { Text("Approve") }
                             OutlinedButton(onClick = {
                                 val callId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.firstOrNull { it.name == "propose_write_file" }?.id
-                                messages += ChatMessage(MessageRole.TOOL, "User rejected the proposed change.",
-                                    toolCallId = callId, toolName = "propose_write_file")
+                                appendMessage(ChatMessage(MessageRole.TOOL, "User rejected the proposed change.",
+                                    toolCallId = callId, toolName = "propose_write_file"))
                                 pendingProposal = null
                                 status = "Write rejected. Continue agent?"
                             }) { Text("Reject") }
