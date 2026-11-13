@@ -133,7 +133,8 @@ class ToolGateway(context: Context) {
             else -> error("Unsupported approval action.")
         }
     }
-\n    fun prepareWrite(call: ToolCallRequest): ToolOutcome = try {
+
+    fun prepareWrite(call: ToolCallRequest): ToolOutcome = try {
         require(call.name == "propose_write_file")
         val args = JSONObject(call.argumentsJson)
         val path = args.getString("path")

@@ -36,7 +36,7 @@ class WorkspaceFiles(
     fun readRange(path: String, startLine: Int, endLine: Int): String {
         require(startLine >= 1 && endLine >= startLine && endLine - startLine <= 2000)
         return read(path).lineSequence().drop(startLine - 1).take(endLine - startLine + 1)
-            .mapIndexed { i, line -> "${startLine + i}: $line" }.joinToString("\\n")
+            .mapIndexed { i, line -> "${startLine + i}: $line" }.joinToString("\n")
     }
 
     fun searchText(query: String, directory: String = ""): List<String> {
@@ -103,8 +103,8 @@ class WorkspaceFiles(
     }
 
     private fun resolve(path: String, allowRoot: Boolean = false): File {
-        require(!path.startsWith("/") && !path.startsWith("\\\\")) { "Absolute paths are not allowed" }
-        val parts = path.replace('\\\\', '/').split('/')
+        require(!path.startsWith("/") && !path.startsWith("\\")) { "Absolute paths are not allowed" }
+        val parts = path.replace('\\', '/').split('/')
         require(parts.none { it == ".." }) { "Parent traversal is not allowed" }
         val candidate = if (path.isBlank()) workspace.root else File(workspace.root, path)
         val rootPath = workspace.root.canonicalFile.toPath()

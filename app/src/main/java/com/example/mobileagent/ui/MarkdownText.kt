@@ -20,7 +20,7 @@ fun MarkdownText(markdown: String) {
         var codeMode = false
         val code = StringBuilder()
         val normal = StringBuilder()
-        fun flushNormal() {
+        @Composable fun flushNormal() {
             if (normal.isNotEmpty()) {
                 Text(normal.toString().trimEnd(), style = MaterialTheme.typography.bodyMedium)
                 normal.clear()

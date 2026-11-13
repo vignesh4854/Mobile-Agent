@@ -8,7 +8,7 @@ object SensitiveFilePolicy {
     private val blockedSuffixes = listOf(".pem", ".key", ".p12", ".pfx", ".keystore")
 
     fun isSensitive(relativePath: String): Boolean {
-        val normalized = relativePath.replace('\\\\', '/').trimStart('/').lowercase()
+        val normalized = relativePath.replace('\\', '/').trimStart('/').lowercase()
         if (normalized == ".git/config" || normalized.startsWith(".git/config/")) return true
         val parts = normalized.split('/').filter { it.isNotBlank() }
         if (parts.any { it == ".ssh" }) return true

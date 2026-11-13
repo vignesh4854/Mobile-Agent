@@ -43,11 +43,11 @@ class GitRepositoryManager(context: Context) {
         val s = git.status().call()
         GitStatus(
             branch = git.repository.branch ?: "(detached HEAD)",
-            added = s.added().toList().sorted(),
-            changed = (s.changed() + s.modified()).toList().distinct().sorted(),
-            removed = (s.removed() + s.missing()).toList().distinct().sorted(),
-            untracked = s.untracked().toList().sorted(),
-            conflicting = s.conflicting().toList().sorted()
+            added = s.added.toList().sorted(),
+            changed = (s.changed + s.modified).toList().distinct().sorted(),
+            removed = (s.removed + s.missing).toList().distinct().sorted(),
+            untracked = s.untracked.toList().sorted(),
+            conflicting = s.conflicting.toList().sorted()
         )
     }
 
