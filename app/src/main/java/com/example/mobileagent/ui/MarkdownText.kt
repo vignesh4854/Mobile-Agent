@@ -54,7 +54,7 @@ fun MarkdownText(markdown: String, showCopy: Boolean = true) {
         // A native TextView keeps Markwon's CommonMark rendering and Android text selection.
         // The surrounding horizontal scroll allows wide Markdown tables/code lines to remain usable.
         androidx.compose.foundation.layout.Box(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            modifier = Modifier.fillMaxWidth()
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxWidth(),

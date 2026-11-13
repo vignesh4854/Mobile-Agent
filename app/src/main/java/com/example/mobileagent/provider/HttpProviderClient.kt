@@ -37,7 +37,15 @@ class HttpProviderClient : ProviderClient {
         catch (e: Exception) { throw ProviderException("Network error: ${e.message}", e) }
         response.use {
             val body = it.body ?: throw ProviderException("Empty provider response")
-            if (!it.isSuccessful) throw ProviderException("HTTP ${it.code}: ${body.string().take(1200)}")
+            if (!it.isSuccessful) {
+                val text = body.string()
+                val looksLikeHtml = text.trimStart().startsWith("<!DOCTYPE", true) || text.trimStart().startsWith("<html", true)
+                throw ProviderException(
+                    if (looksLikeHtml) "HTTP ${it.code} from $url - the server returned a web page, not an API response. " +
+                        "Check the base URL and endpoint in Settings (it should point to an API, e.g. https://api.openai.com/v1 + chat/completions)."
+                    else "HTTP ${it.code} from $url: ${text.take(1200)}"
+                )
+            }
             val contentType = it.header("Content-Type").orEmpty()
             if (contentType.contains("text/event-stream", true)) {
                 parseSse(body.source(), config.protocol, onText)
