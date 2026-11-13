@@ -42,3 +42,10 @@ Added unit tests for orchestration sequencing, parallel reviewer/debugger execut
 ## V3.4.1 interface update
 
 The app now launches into a chat-first home screen. The composer remains fixed above the bottom navigation. Projects and Team are primary destinations; Git, Research, and provider/integration configuration are grouped under More. See `V3.4.1-UI-RELEASE-NOTES.md` and the added manual UI checks in `V3.4-TEST-PLAN.md`.
+
+## V3.4.2 chat rendering update
+Assistant output now uses a shared Markwon-based Markdown renderer with table and strikethrough support. Assistant responses expose a Copy response action, and rendered text supports Android long-press text selection. The same component is used for multi-agent final output. Build and device verification are still required; see `V3.4.2-CHAT-RENDERING-RELEASE-NOTES.md`.
+
+
+## V3.4.3 project file browser
+Open **Projects**, tap a project card, and browse its folders/files. Tap a text file to preview it. Use **Export** / **Export to phone** to save it through Android's system file picker (for example, into Downloads). This is the supported way to move files out of the app-private workspace.

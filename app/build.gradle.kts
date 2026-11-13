@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.mobileagent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "3.4.1"
+        versionCode = 17
+        versionName = "3.4.3"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -29,6 +29,9 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("io.noties.markwon:core:4.6.2")
+    implementation("io.noties.markwon:ext-tables:4.6.2")
+    implementation("io.noties.markwon:ext-strikethrough:4.6.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")

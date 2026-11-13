@@ -237,7 +237,7 @@ fun MultiAgentPanel(context: Context) {
         }
         if (finalOutput.isNotBlank()) item {
             Text("Final team report", style = MaterialTheme.typography.titleLarge)
-            ElevatedCard { MarkdownText(finalOutput) }
+            ElevatedCard { MarkdownText(finalOutput, showCopy = true) }
         }
         if (events.isNotEmpty()) item {
             Text("Execution trace", style = MaterialTheme.typography.titleLarge)

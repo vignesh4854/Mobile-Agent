@@ -249,7 +249,7 @@ fun AgentApp(context: Context) {
                         Text(if (m.role == MessageRole.USER) "You" else "Assistant",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary)
-                        MarkdownText(m.content)
+                        MarkdownText(m.content, showCopy = m.role == MessageRole.ASSISTANT)
                     }
                 }
             }
@@ -258,7 +258,7 @@ fun AgentApp(context: Context) {
                     ElevatedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             Text("Generating…", style = MaterialTheme.typography.labelMedium)
-                            MarkdownText(streamingText)
+                            MarkdownText(streamingText, showCopy = true)
                         }
                     }
                 }
