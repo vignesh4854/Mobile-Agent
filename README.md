@@ -1,75 +1,76 @@
-# Mobile AI Coding V1
+# Mobile Agent V2.7 — Approval-gated mobile coding agent
 
-An Android-first, serverless AI chat + local project file assistant. The app calls model APIs directly and uses Android's Storage Access Framework (SAF) to access only the project directory selected by the user.
+Android Kotlin + Jetpack Compose starter. Model inference uses a configurable external HTTPS provider. Workspace, local Git, and tool dispatch run on Android; GitHub Actions provides optional remote CI/build/test execution. No custom VPS/backend is required.
 
-## V1 features
+## V2.7 additions
 
-- Claude Mode (Anthropic Messages API protocol)
-- OpenAI Mode (Chat Completions protocol)
-- Custom base URL, endpoint path, API key, model ID and optional custom headers
-- Streaming text responses (SSE)
-- Native tool-call parsing for both protocols
-- Local tools: list files, read files, search filenames/text, create/edit files, apply full-file patches, delete files
-- Approval dialog before every write/delete
-- Folder-scoped access using Android SAF
-- Encrypted preferences for API credentials (AndroidX Security Crypto)
-- Local conversation history in app preferences
+### Agent approval proposals
 
-## Build
+The model can propose the following operations, but cannot execute them directly:
 
-1. Install Android Studio (recent stable version) and Android SDK Platform 35.
-2. Open this folder as an existing Gradle project.
-3. Allow Gradle sync to download dependencies.
-4. Build > Build Bundle(s) / APK(s) > Build APK(s).
+- `propose_git_commit` — local commit. **Stages all current repository changes**, then commits with the supplied message and author identity.
+- `propose_git_pull` — pulls remote changes into the current branch.
+- `propose_git_push` — publishes local commits to the configured remote.
+- `propose_trigger_workflow` — requests a GitHub Actions `workflow_dispatch` for a named workflow and ref.
 
-Or from a machine with Gradle installed:
+Each proposal pauses the agent and displays a human approval card. The operation runs only after the user taps **Approve and execute**. Rejection is returned to the model as a tool result. If an operation fails, the failure is returned; the UI does not claim it succeeded.
 
-```bash
-gradle assembleDebug
-```
+Read-only agent tools remain available for web research, saved research, local Git status/diff/branches, and GitHub Actions runs/jobs/logs/artifacts. File edits still require explicit approval and an original-file hash check.
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+### Build/test integration
 
-This source archive does not include the Gradle wrapper JAR. Android Studio can open and build the project directly; alternatively generate a wrapper locally with `gradle wrapper`.
+A GitHub Actions workflow is included at `.github/workflows/android-ci.yml`. On push, pull request, or manual dispatch it:
+1. Sets up JDK 17 and Gradle 8.9.
+2. Runs `:app:testDebugUnitTest`.
+3. Builds the debug APK with `:app:assembleDebug`.
+4. Uploads the APK as a 7-day workflow artifact.
 
-## Configure
+This is **remote CI**, not an on-device shell or terminal. The app does not execute arbitrary commands on Android. The agent can inspect workflow runs, jobs, and logs; after an approved push, CI will run from the repository workflow.
 
-Open Settings (gear icon):
+## Setup
 
-- Mode: Claude or OpenAI
-- Base URL: for example `https://api.anthropic.com` or `https://api.openai.com/v1`
-- Endpoint: `/v1/messages` for Claude; `/chat/completions` for OpenAI Chat Completions when base URL already ends in `/v1`
-- API key and model ID
-- Optional custom headers as `Name: value`, one per line
+1. Open the project in Android Studio (recent stable version recommended).
+2. Allow Gradle sync to resolve dependencies.
+3. Build and install the `app` debug variant, or push the project to GitHub and use the included CI workflow.
+4. Configure provider protocol, HTTPS base URL, endpoint, model ID, and provider API key.
+5. For web search, enter a Brave Search API key.
+6. For GitHub Actions, enter a fine-grained GitHub token and repository owner/name.
+7. Clone a GitHub HTTPS repository from the Git tab into the app-private workspace.
 
-For Claude, the app sends `anthropic-version: 2023-06-01` and `x-api-key` headers. For OpenAI, it sends `Authorization: Bearer ...`.
+## GitHub token permissions
 
-Third-party gateways vary. Their base URL, endpoint, required headers and model ID must match that gateway's documentation. The app does not claim every provider is fully protocol-compatible.
+Use a fine-grained token scoped to only the target repository. Depending on intended operations:
+- Repository Contents: **Read** for clone/inspection; **Read and write** for push.
+- Actions: **Read** for run/job/log/artifact inspection; **Read and write** for workflow dispatch.
+- Avoid organization-wide or classic broad-scope tokens when a repository-scoped token is sufficient.
 
-## Project folder
+The same token is held in Agent screen memory and sent only to GitHub. It is not added to model prompts and is not persisted by the app. The provider and Brave keys are also screen-memory-only (the model provider key has its separate existing Keystore-backed config store).
 
-Tap the folder icon and select the project root using Android's folder picker. Grant access when prompted. The app remembers the permission when Android allows persistable access.
+## Approval boundaries and cautions
 
-## Safety
+- File changes require approval and hash recheck.
+- Agent Git mutations (commit, pull, push) and workflow dispatch are proposal-only and require a separate approval tap.
+- **Commit stages every current repository change**, not selected files. Review Git status/diff before approving.
+- Pull may modify files and can encounter merge conflicts.
+- Push publishes commits to the remote.
+- Workflow dispatch starts a remote job that may consume CI minutes or access repository secrets according to that workflow's own permissions.
+- Branch creation/checkout remain manual in the Git tab.
+- Never approve an operation based solely on model-generated claims; inspect the displayed target and scope.
 
-- Read tools are available to the model after a project is selected.
-- Every create/edit/delete tool call pauses for user approval.
-- Paths are resolved relative to the selected folder; absolute paths and `..` traversal are rejected.
-- The app cannot guarantee isolation from malicious code or a compromised model provider. This MVP does not execute shell commands.
-- Avoid selecting folders containing secrets if you do not want their contents sent to your model provider.
-- API keys are stored in encrypted app preferences. They are never intentionally included in model prompts.
+## Important limitations / not production-ready
 
-## Current limitations
+- **Not compiled or device-tested in this environment.** The ZIP archive can be verified, but this does not prove Android build success.
+- JGit Android runtime compatibility still needs verification on a real device.
+- Git diff remains a summary rather than a complete patch. Commit stages all changes. Merge conflict resolution UI is not included.
+- Workflow dispatch currently supports a workflow filename or numeric ID plus a ref; workflow input parameters are not implemented.
+- GitHub API client follows redirects for GitHub's own API/download endpoints. Web retrieval uses a separate client with redirects disabled.
+- Web retrieval is baseline SSRF protection: HTTPS only, redirects disabled, DNS resolution checked for private/local IPs, and response size/content type bounded. DNS rebinding and advanced network edge cases are not comprehensively solved.
+- HTML extraction is lightweight regex cleanup, not a full browser/DOM parser.
+- Saved research is app-private but not encrypted. Artifact extraction quotas need stronger enforcement.
+- File edit is still full-file replacement with a diff preview, not a context-aware patch.
+- No persistent/resumable sessions, MCP, on-device terminal, multi-agent orchestration, or comprehensive automated test suite.
+- The included CI test task currently runs the project's unit-test source set; no comprehensive application tests have been added yet.
 
-- OpenAI Chat Completions and Anthropic Messages are implemented. OpenAI Responses API is not yet implemented.
-- Model discovery is not standardized across providers; enter the model ID manually.
-- File operations are text-oriented and intended for source/config files, not binary files.
-- The first version uses a simple local conversation persistence implementation; it is not a multi-device sync system.
-- Streaming tool-call argument assembly is implemented for the supported protocols, but gateways may differ in their SSE behavior.
-- No Git, terminal, Python, Node.js, MCP, background autonomous execution or multi-agent support in V1.
+## Security note
 
-## GitHub Actions
-
-A workflow is included at `.github/workflows/android.yml`. Push to `main` or `master`, or run it manually from the Actions tab. It builds a debug APK and uploads it as a workflow artifact. The workflow uses Gradle 8.9 and JDK 17.
-
-The selected model and gateway must support the corresponding native tool/function-calling protocol for file tools to work. If a model only supports plain text chat, it will not be able to invoke local file operations in this V1 build.
+This is a development prototype. Review source and workflow permissions, run dependency/static analysis checks, and validate provider compatibility and JGit behavior before using important repositories or credentials.
