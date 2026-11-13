@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.mobileagent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "3.1.0"
+        versionCode = 15
+        versionName = "3.4.1"
     }
     buildFeatures { compose = true }
     compileOptions {

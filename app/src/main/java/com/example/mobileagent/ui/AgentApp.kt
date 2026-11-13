@@ -183,185 +183,275 @@ fun AgentApp(context: Context) {
         }
     }
 
-    if (selectedScreen != 0) {
-        Column(Modifier.fillMaxSize()) {
-            TabRow(selectedTabIndex = selectedScreen) {
-                Tab(selected = selectedScreen == 0, onClick = { selectedScreen = 0 }, text = { Text("Agent") })
-                Tab(selected = selectedScreen == 1, onClick = { selectedScreen = 1 }, text = { Text("Git") })
-                Tab(selected = selectedScreen == 2, onClick = { selectedScreen = 2 }, text = { Text("Research") })
-                Tab(selected = selectedScreen == 3, onClick = { selectedScreen = 3 }, text = { Text("Projects") })
+    Column(Modifier.fillMaxSize()) {
+      Box(Modifier.weight(1f)) {
+      when (selectedScreen) {
+        1 -> ProjectsScreen(context)
+        2 -> MultiAgentPanel(context)
+        3 -> MoreScreen(
+            onGit = { selectedScreen = 4 },
+            onResearch = { selectedScreen = 5 },
+            onSettings = { selectedScreen = 6 }
+        )
+        4 -> GitPanel(context)
+        5 -> ResearchPanel(context)
+        6 -> SettingsScreen(
+            protocol = protocol, onProtocol = ::mode,
+            baseUrl = baseUrl, onBaseUrl = { baseUrl = it },
+            endpoint = endpoint, onEndpoint = { endpoint = it },
+            model = model, onModel = { model = it },
+            apiKey = apiKey, onApiKey = { apiKey = it },
+            braveKey = braveKey, onBraveKey = { braveKey = it },
+            githubToken = githubToken, onGithubToken = { githubToken = it },
+            githubOwner = githubOwner, onGithubOwner = { githubOwner = it },
+            githubRepo = githubRepo, onGithubRepo = { githubRepo = it },
+            onSave = {
+                runCatching {
+                    store.save(ApiConfig(baseUrl, endpoint, apiKey, model, protocol))
+                    status = "Settings saved."
+                }.onFailure { status = it.message ?: "Save failed" }
+            },
+            onClearChat = {
+                messages.clear(); pendingProposal = null; pendingAction = null; lastBackup = null
+                activeSessionId?.let { id -> scope.launch { sessionRepository.clearMessages(id) } }
+                status = "Chat cleared."
+            },
+            status = status
+        )
+        else -> Column(Modifier.fillMaxSize()) {
+          LazyColumn(
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)) {
+                    Text("Mobile Agent", style = MaterialTheme.typography.headlineMedium)
+                    Text("Your AI coding workspace", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            when (selectedScreen) {
-                1 -> GitPanel(context)
-                2 -> ResearchPanel(context)
-                3 -> ProjectsScreen(context)
+            if (!sessionReady) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (messages.isEmpty() && !busy) {
+                item {
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("What would you like to build?", style = MaterialTheme.typography.titleLarge)
+                            Text("Ask a question, plan a feature, debug code, or work on your selected project.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Configure your model provider in More → Settings.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
             }
+            items(messages.filter { it.role != MessageRole.TOOL }) { m ->
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(if (m.role == MessageRole.USER) "You" else "Assistant",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                        MarkdownText(m.content)
+                    }
+                }
+            }
+            if (streamingText.isNotBlank() && busy) {
+                item {
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Generating…", style = MaterialTheme.typography.labelMedium)
+                            MarkdownText(streamingText)
+                        }
+                    }
+                }
+            }
+            pendingAction?.let { proposal ->
+                item {
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Approval required", style = MaterialTheme.typography.titleMedium)
+                            Text(proposal.toolName, style = MaterialTheme.typography.labelLarge)
+                            Text(proposal.summary)
+                            Text("Repository: ${githubOwner.ifBlank { "(owner not set)" }}/${githubRepo.ifBlank { "(repo not set)" }}")
+                            Text("This operation will not run until you approve it. Review the scope carefully.")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(enabled = !busy, onClick = {
+                                    busy = true
+                                    scope.launch {
+                                        try {
+                                            val result = gateway.executeApprovedAction(proposal, githubToken, githubOwner.trim(), githubRepo.trim())
+                                            appendMessage(ChatMessage(MessageRole.TOOL, "Approved action result: $result",
+                                                toolCallId = proposal.callId, toolName = proposal.toolName))
+                                            pendingAction = null; status = "Action completed. Continue agent?"
+                                        } catch (e: Exception) {
+                                            appendMessage(ChatMessage(MessageRole.TOOL, "Approved action failed: ${e.message}",
+                                                toolCallId = proposal.callId, toolName = proposal.toolName))
+                                            pendingAction = null; status = e.message ?: "Approved action failed."
+                                        } finally { busy = false }
+                                    }
+                                }) { Text("Approve") }
+                                OutlinedButton(enabled = !busy, onClick = {
+                                    appendMessage(ChatMessage(MessageRole.TOOL, "User rejected this proposed action; it was not executed.",
+                                        toolCallId = proposal.callId, toolName = proposal.toolName))
+                                    pendingAction = null; status = "Action rejected. Continue agent?"
+                                }) { Text("Reject") }
+                            }
+                        }
+                    }
+                }
+            }
+            pendingProposal?.let { proposal ->
+                item {
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Review proposed file change", style = MaterialTheme.typography.titleMedium)
+                            Text(proposal.path, style = MaterialTheme.typography.labelLarge)
+                            Text("Unified diff preview", style = MaterialTheme.typography.labelMedium)
+                            Text(proposal.diff, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall)
+                            Text("Approval writes this complete replacement after checking the original file hash.")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    runCatching {
+                                        val result = gateway.approve(proposal)
+                                        lastBackup = result.backupPath to proposal.path
+                                        appendMessage(ChatMessage(MessageRole.TOOL, "Approved and applied: ${result.relativePath}",
+                                            toolCallId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.firstOrNull { it.name == "propose_write_file" }?.id,
+                                            toolName = "propose_write_file"))
+                                        pendingProposal = null; status = "Write approved. Continue agent?"
+                                    }.onFailure { status = it.message ?: "Write failed" }
+                                }) { Text("Approve") }
+                                OutlinedButton(onClick = {
+                                    val callId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.firstOrNull { it.name == "propose_write_file" }?.id
+                                    appendMessage(ChatMessage(MessageRole.TOOL, "User rejected the proposed change.",
+                                        toolCallId = callId, toolName = "propose_write_file"))
+                                    pendingProposal = null; status = "Write rejected. Continue agent?"
+                                }) { Text("Reject") }
+                            }
+                        }
+                    }
+                }
+            }
+            if (pendingProposal == null && pendingAction == null && messages.lastOrNull()?.role == MessageRole.TOOL && !busy) {
+                item { OutlinedButton(onClick = { startAgent() }) { Text("Continue agent") } }
+            }
+            lastBackup?.let { backup ->
+                item {
+                    OutlinedButton(onClick = {
+                        runCatching { status = gateway.restore(backup.first, backup.second); lastBackup = null }
+                            .onFailure { status = it.message ?: "Undo failed" }
+                    }) { Text("Undo last approved write") }
+                }
+            }
+            item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+          }
+          Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              if (model.isBlank() || apiKey.isBlank()) {
+                TextButton(onClick = { selectedScreen = 6 }) {
+                  Text("Set up your model provider in Settings to start chatting")
+                }
+              }
+              Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                OutlinedTextField(
+                  value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f),
+                  placeholder = { Text("Message your agent…") }, minLines = 1, maxLines = 5,
+                  enabled = !busy, shape = MaterialTheme.shapes.large
+                )
+                Spacer(Modifier.width(8.dp))
+                FilledIconButton(
+                  enabled = sessionReady && !busy && input.isNotBlank() && model.isNotBlank() && apiKey.isNotBlank(),
+                  onClick = {
+                    appendMessage(ChatMessage(MessageRole.USER, input.trim()))
+                    input = ""
+                    startAgent()
+                  }
+                ) { Text("↑") }
+              }
+            }
+          }
         }
-        return
+      }
+
+    }
+    NavigationBar {
+        NavigationBarItem(selected = selectedScreen == 0, onClick = { selectedScreen = 0 },
+            icon = { Text("◉") }, label = { Text("Chat") })
+        NavigationBarItem(selected = selectedScreen == 1, onClick = { selectedScreen = 1 },
+            icon = { Text("▦") }, label = { Text("Projects") })
+        NavigationBarItem(selected = selectedScreen == 2, onClick = { selectedScreen = 2 },
+            icon = { Text("◎") }, label = { Text("Team") })
+        NavigationBarItem(selected = selectedScreen in 3..6, onClick = { selectedScreen = 3 },
+            icon = { Text("⋯") }, label = { Text("More") })
+    }
     }
 
+}
+
+
+@Composable
+private fun MoreScreen(onGit: () -> Unit, onResearch: () -> Unit, onSettings: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("More", style = MaterialTheme.typography.headlineMedium)
+        Text("Developer tools and app configuration", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        MoreAction("Git", "Branches, changes, commits and repository operations", onGit)
+        MoreAction("Research", "Web search and saved research", onResearch)
+        MoreAction("Settings", "Model provider, API keys, integrations and chat controls", onSettings)
+    }
+}
+
+@Composable
+private fun MoreAction(title: String, description: String, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("›", style = MaterialTheme.typography.headlineSmall)
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    protocol: ProtocolMode, onProtocol: (ProtocolMode) -> Unit,
+    baseUrl: String, onBaseUrl: (String) -> Unit,
+    endpoint: String, onEndpoint: (String) -> Unit,
+    model: String, onModel: (String) -> Unit,
+    apiKey: String, onApiKey: (String) -> Unit,
+    braveKey: String, onBraveKey: (String) -> Unit,
+    githubToken: String, onGithubToken: (String) -> Unit,
+    githubOwner: String, onGithubOwner: (String) -> Unit,
+    githubRepo: String, onGithubRepo: (String) -> Unit,
+    onSave: () -> Unit, onClearChat: () -> Unit, status: String
+) {
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            TabRow(selectedTabIndex = 0) {
-                Tab(selected = true, onClick = { selectedScreen = 0 }, text = { Text("Agent") })
-                Tab(selected = false, onClick = { selectedScreen = 1 }, text = { Text("Git") })
-                Tab(selected = false, onClick = { selectedScreen = 2 }, text = { Text("Research") })
-            }
-        }
-        item {
-            Text("Mobile Agent V3.0", style = MaterialTheme.typography.headlineMedium)
-            Text("Native agent foundation · local projects · provider-independent orchestration")
-        }
-        item {
-            Text("Protocol", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(protocol == ProtocolMode.OPENAI, { mode(ProtocolMode.OPENAI) }, label = { Text("OpenAI") })
-                FilterChip(protocol == ProtocolMode.ANTHROPIC, { mode(ProtocolMode.ANTHROPIC) }, label = { Text("Claude") })
-            }
-        }
-        item { OutlinedTextField(baseUrl, { baseUrl = it }, Modifier.fillMaxWidth(), label = { Text("HTTPS base URL") }) }
-        item { OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), label = { Text("Endpoint path") }) }
-        item { OutlinedTextField(model, { model = it }, Modifier.fillMaxWidth(), label = { Text("Model ID") }) }
-        item { OutlinedTextField(apiKey, { apiKey = it }, Modifier.fillMaxWidth(), label = { Text("Model provider API key") }) }
-        item { HorizontalDivider() }
-        item { Text("Agent integrations (keys stay in screen memory)", style = MaterialTheme.typography.titleMedium) }
-        item { OutlinedTextField(braveKey, { braveKey = it }, Modifier.fillMaxWidth(), label = { Text("Brave Search API key") }) }
-        item { OutlinedTextField(githubToken, { githubToken = it }, Modifier.fillMaxWidth(), label = { Text("GitHub token — read-only Actions scope recommended") }) }
-        item { OutlinedTextField(githubOwner, { githubOwner = it }, Modifier.fillMaxWidth(), label = { Text("GitHub repository owner") }) }
-        item { OutlinedTextField(githubRepo, { githubRepo = it }, Modifier.fillMaxWidth(), label = { Text("GitHub repository name") }) }
+        item { Text("Settings", style = MaterialTheme.typography.headlineMedium) }
+        item { Text("Model provider", style = MaterialTheme.typography.titleMedium) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { runCatching {
-                    store.save(ApiConfig(baseUrl, endpoint, apiKey, model, protocol)); status = "Settings saved."
-                }.onFailure { status = it.message ?: "Save failed" } }) { Text("Save settings") }
-                OutlinedButton(onClick = {
-                    messages.clear(); pendingProposal = null; pendingAction = null; lastBackup = null
-                    activeSessionId?.let { id -> scope.launch { sessionRepository.clearMessages(id) } }
-                    status = "Chat cleared."
-                }) { Text("Clear chat") }
+                FilterChip(selected = protocol == ProtocolMode.OPENAI, onClick = { onProtocol(ProtocolMode.OPENAI) }, label = { Text("OpenAI-compatible") })
+                FilterChip(selected = protocol == ProtocolMode.ANTHROPIC, onClick = { onProtocol(ProtocolMode.ANTHROPIC) }, label = { Text("Anthropic") })
             }
         }
+        item { OutlinedTextField(baseUrl, onBaseUrl, Modifier.fillMaxWidth(), label = { Text("HTTPS base URL") }, singleLine = true) }
+        item { OutlinedTextField(endpoint, onEndpoint, Modifier.fillMaxWidth(), label = { Text("Endpoint path") }, singleLine = true) }
+        item { OutlinedTextField(model, onModel, Modifier.fillMaxWidth(), label = { Text("Model ID") }, singleLine = true) }
+        item { OutlinedTextField(apiKey, onApiKey, Modifier.fillMaxWidth(), label = { Text("Model provider API key") }, singleLine = true) }
         item { HorizontalDivider() }
-        item { Text("Conversation", style = MaterialTheme.typography.titleLarge) }
-        items(messages.filter { it.role != MessageRole.TOOL }) { m ->
-            ElevatedCard {
-                Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text(if (m.role == MessageRole.USER) "You" else "Assistant", style = MaterialTheme.typography.labelMedium)
-                    MarkdownText(m.content)
-                }
-            }
-        }
-        if (streamingText.isNotBlank() && busy) {
-            item {
-                ElevatedCard {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("Streaming response…", style = MaterialTheme.typography.labelMedium)
-                        MarkdownText(streamingText)
-                    }
-                }
-            }
-        }
+        item { Text("Integrations", style = MaterialTheme.typography.titleMedium) }
+        item { OutlinedTextField(braveKey, onBraveKey, Modifier.fillMaxWidth(), label = { Text("Brave Search API key") }, singleLine = true) }
+        item { OutlinedTextField(githubToken, onGithubToken, Modifier.fillMaxWidth(), label = { Text("GitHub token") }, singleLine = true) }
+        item { OutlinedTextField(githubOwner, onGithubOwner, Modifier.fillMaxWidth(), label = { Text("GitHub repository owner") }, singleLine = true) }
+        item { OutlinedTextField(githubRepo, onGithubRepo, Modifier.fillMaxWidth(), label = { Text("GitHub repository name") }, singleLine = true) }
         item {
-            OutlinedTextField(input, { input = it }, Modifier.fillMaxWidth(), label = { Text("Message") }, minLines = 2)
-            Button(enabled = sessionReady && !busy && input.isNotBlank(), onClick = {
-                appendMessage(ChatMessage(MessageRole.USER, input.trim()))
-                input = ""
-                startAgent()
-            }) { Text(if (busy) "Working…" else "Send") }
-        }
-        pendingAction?.let { proposal ->
-            item {
-                ElevatedCard {
-                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Approval required", style = MaterialTheme.typography.titleMedium)
-                        Text(proposal.toolName, style = MaterialTheme.typography.labelLarge)
-                        Text(proposal.summary)
-                        Text("Repository: ${githubOwner.ifBlank { "(owner not set)" }}/${githubRepo.ifBlank { "(repo not set)" }}")
-                        Text("This operation will not run until you approve it. Review the scope carefully.")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(enabled = !busy, onClick = {
-                                busy = true
-                                scope.launch {
-                                    try {
-                                        val result = gateway.executeApprovedAction(
-                                            proposal, githubToken, githubOwner.trim(), githubRepo.trim()
-                                        )
-                                        appendMessage(ChatMessage(MessageRole.TOOL, "Approved action result: $result",
-                                            toolCallId = proposal.callId, toolName = proposal.toolName))
-                                        pendingAction = null
-                                        status = "Action completed. Continue agent?"
-                                    } catch (e: Exception) {
-                                        appendMessage(ChatMessage(MessageRole.TOOL, "Approved action failed: ${e.message}",
-                                            toolCallId = proposal.callId, toolName = proposal.toolName))
-                                        pendingAction = null
-                                        status = e.message ?: "Approved action failed."
-                                    } finally { busy = false }
-                                }
-                            }) { Text("Approve and execute") }
-                            OutlinedButton(enabled = !busy, onClick = {
-                                appendMessage(ChatMessage(MessageRole.TOOL, "User rejected this proposed action; it was not executed.",
-                                    toolCallId = proposal.callId, toolName = proposal.toolName))
-                                pendingAction = null
-                                status = "Action rejected. Continue agent?"
-                            }) { Text("Reject") }
-                        }
-                    }
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onSave) { Text("Save settings") }
+                OutlinedButton(onClick = onClearChat) { Text("Clear chat") }
             }
         }
-        pendingProposal?.let { proposal ->
-            item {
-                ElevatedCard {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Review proposed file change", style = MaterialTheme.typography.titleMedium)
-                        Text(proposal.path, style = MaterialTheme.typography.labelLarge)
-                        Text("Unified diff preview", style = MaterialTheme.typography.labelMedium)
-                        Text(proposal.diff, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall)
-                        Text("Approval writes this complete replacement after checking the original file hash.")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                runCatching {
-                                    val result = gateway.approve(proposal)
-                                    lastBackup = result.backupPath to proposal.path
-                                    appendMessage(ChatMessage(MessageRole.TOOL, "Approved and applied: ${result.relativePath}",
-                                        toolCallId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.firstOrNull { it.name == "propose_write_file" }?.id,
-                                        toolName = "propose_write_file"))
-                                    pendingProposal = null
-                                    status = "Write approved. Continue agent?"
-                                }.onFailure { status = it.message ?: "Write failed" }
-                            }) { Text("Approve") }
-                            OutlinedButton(onClick = {
-                                val callId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.firstOrNull { it.name == "propose_write_file" }?.id
-                                appendMessage(ChatMessage(MessageRole.TOOL, "User rejected the proposed change.",
-                                    toolCallId = callId, toolName = "propose_write_file"))
-                                pendingProposal = null
-                                status = "Write rejected. Continue agent?"
-                            }) { Text("Reject") }
-                        }
-                    }
-                }
-            }
-        }
-        if (pendingProposal == null && pendingAction == null && messages.lastOrNull()?.role == MessageRole.TOOL && !busy) {
-            item {
-                OutlinedButton(onClick = { startAgent() }) { Text("Continue agent") }
-            }
-        }
-        lastBackup?.let { backup ->
-            item {
-                OutlinedButton(onClick = {
-                    runCatching {
-                        status = gateway.restore(backup.first, backup.second)
-                        lastBackup = null
-                    }.onFailure { status = it.message ?: "Undo failed" }
-                }) { Text("Undo last approved write") }
-            }
-        }
-        item { Text(status, style = MaterialTheme.typography.bodySmall) }
-        item {
-            Text("Safety: web pages are untrusted data; retrieval is HTTPS-only with redirects disabled. File writes require approval and hash recheck. Agent commit, pull, push, and workflow dispatch are proposal-only and require approval here. Checkout remains manual in the Git tab. Commit stages ALL repository changes. Keys entered here are memory-only and are never added to model prompts, but are sent to their respective providers.",
-                style = MaterialTheme.typography.bodySmall)
-        }
+        item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("API credentials are sent to their configured providers. Avoid sharing keys or screenshots containing them.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }

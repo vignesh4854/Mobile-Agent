@@ -22,11 +22,11 @@ sealed class ToolOutcome {
     ) : ToolOutcome()
 }
 
-class ToolGateway(context: Context) {
+class ToolGateway(context: Context, workspaceRoot: java.io.File? = null) {
     private val research = ResearchClient(context)
     private val git = GitRepositoryManager(context)
     private val actions = GitHubActionsClient(context)
-    private val workspace = WorkspaceManager(context.filesDir)
+    private val workspace = WorkspaceManager(context.filesDir, workspaceRoot)
     private val files = WorkspaceFiles(workspace, AuditLog(context))
 
     suspend fun executeReadOnly(
@@ -55,9 +55,9 @@ class ToolGateway(context: Context) {
             }
             "git_status" -> withContext(Dispatchers.IO) {
                 val st = git.status()
-                "Branch: ${st.branch}\nAdded: ${st.added.joinToString()}\nChanged: ${st.changed.joinToString()}\nRemoved: ${st.removed.joinToString()}\nUntracked: ${st.untracked.joinToString()}\nConflicts: ${st.conflicting.joinToString()}"
+                "Branch: ${st.branch}\nStaged added: ${st.stagedAdded.joinToString()}\nStaged changed: ${st.stagedChanged.joinToString()}\nStaged removed: ${st.stagedRemoved.joinToString()}\nUnstaged modified: ${st.unstagedModified.joinToString()}\nUnstaged removed: ${st.unstagedRemoved.joinToString()}\nUntracked: ${st.untracked.joinToString()}\nConflicts: ${st.conflicting.joinToString()}"
             }
-            "git_diff_summary" -> withContext(Dispatchers.IO) { git.diff() }
+            "git_diff_summary" -> withContext(Dispatchers.IO) { git.stagedDiff() + "\n" + git.unstagedDiff() }
             "git_branches" -> withContext(Dispatchers.IO) { git.branches().joinToString("\n") }
             "github_actions_runs" -> {
                 validateRepo(owner, repo, githubToken)
@@ -100,7 +100,7 @@ class ToolGateway(context: Context) {
                 require(args.optString("author_name").isNotBlank() && args.optString("author_email").contains("@")) {
                     "Valid Git author name and email are required."
                 }
-                "Create a local commit (stages ALL current repository changes): ${args.getString("message")}"
+                "Create a local commit from already-staged changes only: ${args.getString("message")}"
             }
             "propose_git_pull" -> "Pull remote changes into the current local branch. This can modify files and may fail on conflicts."
             "propose_git_push" -> "Push local commits to the configured Git remote. This publishes repository changes."
@@ -122,7 +122,7 @@ class ToolGateway(context: Context) {
         val args = JSONObject(proposal.argumentsJson)
         return when (proposal.toolName) {
             "propose_git_commit" -> withContext(Dispatchers.IO) {
-                git.commit(args.getString("message"), args.getString("author_name"), args.getString("author_email"))
+                git.commitStaged(args.getString("message"), args.getString("author_name"), args.getString("author_email")).let { "Created commit ${it.abbreviatedId}" }
             }
             "propose_git_pull" -> withContext(Dispatchers.IO) { git.pull(token) }
             "propose_git_push" -> withContext(Dispatchers.IO) { git.push(token) }

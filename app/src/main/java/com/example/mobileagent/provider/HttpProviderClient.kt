@@ -119,7 +119,7 @@ class HttpProviderClient : ProviderClient {
         Triple("github_actions_jobs", "List jobs for a workflow run", numberSchema("run_id")),
         Triple("github_actions_logs", "Read logs for a GitHub Actions job", numberSchema("job_id")),
         Triple("github_actions_artifacts", "List artifacts for a workflow run", numberSchema("run_id")),
-        Triple("propose_git_commit", "Propose a local commit; stages all repository changes and requires explicit approval", objSchema("message", true, "author_name", true, "author_email", true)),
+        Triple("propose_git_commit", "Propose a local commit from already-staged changes only; requires explicit approval", objSchema("message", true, "author_name", true, "author_email", true)),
         Triple("propose_git_pull", "Propose pulling remote changes; requires explicit approval", objSchema()),
         Triple("propose_git_push", "Propose pushing commits to the remote; requires explicit approval", objSchema()),
         Triple("propose_trigger_workflow", "Propose triggering a GitHub Actions workflow; requires explicit approval", objSchema("workflow", true, "ref", true))
